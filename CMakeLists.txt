@@ -27,19 +27,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Skip updating the external dependencies after populating them for the first time")
 
-message("Configuring yaml-cpp...")
-option(YAML_CPP_BUILD_CONTRIB "Enable yaml-cpp contrib in library" OFF)
-option(YAML_CPP_BUILD_TOOLS "Enable parse tools" OFF)
-option(YAML_BUILD_SHARED_LIBS "Build yaml-cpp as a shared library" OFF)
-FetchContent_Declare(
-  yaml-cpp                             
-  GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-  GIT_TAG        yaml-cpp-0.9.0                        
-  SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/ext/yaml-cpp
-)
-FetchContent_MakeAvailable(yaml-cpp)
-include_directories(${yaml-cpp_SOURCE_DIR}/include)
-message("Done configuring yaml-cpp.")
+# Configuring yaml-cpp inside shinro gives a CMake error
+# Sparta already includes yaml-cpp, which is probably the reason
+# for the error.  We don't need to build it again with Ramulator2
+#message("Configuring yaml-cpp...")
+#option(YAML_CPP_BUILD_CONTRIB "Enable yaml-cpp contrib in library" OFF)
+#option(YAML_CPP_BUILD_TOOLS "Enable parse tools" OFF)
+#option(YAML_BUILD_SHARED_LIBS "Build yaml-cpp as a shared library" OFF)
+#FetchContent_Declare(
+#  yaml-cpp
+#  GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+#  GIT_TAG        yaml-cpp-0.9.0
+#  SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/ext/yaml-cpp
+#)
+#FetchContent_MakeAvailable(yaml-cpp)
+#include_directories(${yaml-cpp_SOURCE_DIR}/include)
+#message("Done configuring yaml-cpp.")
 
 message("Configuring fmt...")
 FetchContent_Declare(

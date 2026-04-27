@@ -21,6 +21,7 @@ struct Request {
     enum : int { Read = 0, Write = 1 };
   };
 
+  int uid = -1;        // Transaction unique ID
   int type_id = -1;    // Request type. -1 is the convention for internal maintenance/direct-command requests.
   int source_id = -1;  // Source identifier (e.g., which core)
 
