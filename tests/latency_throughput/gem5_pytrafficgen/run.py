@@ -10,129 +10,20 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(SCRIPT_DIR))
 
-import ramulator
-from ramulator.dram.spec import DRAMStandard
+import config as gem5_config
 
-
-CONFIG_PATH = Path(__file__).resolve().with_name("config.py")
+CONFIG_PATH = SCRIPT_DIR / "config.py"
 DEFAULT_READ_RATIOS = [100, 90, 80, 70, 60, 50]
 DEFAULT_INTENSITIES = [i / 100.0 for i in range(5, 101, 5)]
-ADDR_MAPPER_ALIASES = {
-    "MOP4CLXOR": "MOP4CLXOR",
-    "RoBaRaCoCh": "RoBaRaCoCh",
-    "ChRaBaRoCo": "ChRaBaRoCo",
-}
-TRAFFIC_ALIASES = {
-    "stream": "linear",
-    "random": "random",
-}
-DRAM_PROFILES = {
-    "DDR3": {
-        "dram_class": "DDR3",
-        "org_preset": "DDR3_2Gb_x8",
-        "timing_preset": "DDR3_1600H",
-        "controller_class": "GenericDDR",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "DDR4": {
-        "dram_class": "DDR4",
-        "org_preset": "DDR4_8Gb_x8",
-        "timing_preset": "DDR4_2400R",
-        "controller_class": "GenericDDR",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "DDR5": {
-        "dram_class": "DDR5",
-        "org_preset": "DDR5_16Gb_x8",
-        "timing_preset": "DDR5_4800AN",
-        "controller_class": "GenericDDR",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "GDDR6": {
-        "dram_class": "GDDR6",
-        "org_preset": "GDDR6_8Gb_x16",
-        "timing_preset": "GDDR6_14000_1250mV_double",
-        "controller_class": "GenericDDR",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "GDDR7": {
-        "dram_class": "GDDR7",
-        "org_preset": "GDDR7_16Gb_x8",
-        "timing_preset": "GDDR7_28000_PAM3",
-        "controller_class": "GDDR7",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "HBM1": {
-        "dram_class": "HBM1",
-        "org_preset": "HBM1_2Gb",
-        "timing_preset": "HBM1_2Gbps",
-        "controller_class": "HBM12",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "HBM2": {
-        "dram_class": "HBM2",
-        "org_preset": "HBM2_2Gb",
-        "timing_preset": "HBM2_2000Mbps",
-        "controller_class": "HBM12",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "HBM3": {
-        "dram_class": "HBM3",
-        "org_preset": "HBM3_8Gb_8hi",
-        "timing_preset": "HBM3_6400Mbps",
-        "controller_class": "HBM34",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "HBM4": {
-        "dram_class": "HBM4",
-        "org_preset": "HBM4_32Gb_8Hi",
-        "timing_preset": "HBM4_8000Mbps",
-        "controller_class": "HBM34",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "LPDDR5": {
-        "dram_class": "LPDDR5",
-        "org_preset": "LPDDR5_8Gb_x16",
-        "timing_preset": "LPDDR5_6400",
-        "controller_class": "LPDDR5",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-    "LPDDR6": {
-        "dram_class": "LPDDR6",
-        "org_preset": "LPDDR6_16Gb_x12",
-        "timing_preset": "LPDDR6_10667_BL24",
-        "controller_class": "LPDDR6",
-        "scheduler_class": "FRFCFSRowHit",
-        "row_policy": "Open",
-    },
-}
 STAT_FLOAT_RE = re.compile(r"^([A-Za-z0-9_:.]+)\s+([-+A-Za-z0-9_.]+)")
-
-
-@dataclass(frozen=True)
-class ProfileSpec:
-    bytes_per_req: int
-    peak_gbps_per_channel: float
-
 
 CSV_FIELDS = [
     "dram",
@@ -150,11 +41,9 @@ CSV_FIELDS = [
     "peak_gbps",
     "block_size",
     "duration",
-    "memory_size",
+    "memory_per_channel",
     "addr_mapper",
     "refresh_manager",
-    "channel_mapper",
-    "clock_ratio",
     "read_buffer_size",
     "write_buffer_size",
     "observed_gbps",
@@ -172,49 +61,27 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Run one-channel-count gem5 PyTrafficGen sweeps."
     )
-    parser.add_argument("--dram", required=True, choices=sorted(DRAM_PROFILES))
-    parser.add_argument("--channels", type=int, required=True)
     parser.add_argument(
-        "--addr-mapper",
-        default="MOP4CLXOR",
-        choices=sorted(ADDR_MAPPER_ALIASES),
+        "--dram", required=True, choices=sorted(gem5_config.DRAM_PROFILES)
     )
-    parser.add_argument("--refresh-manager", default="NoRefresh")
-    parser.add_argument("--channel-mapper", default="CacheLineInterleave")
-    parser.add_argument("--clock-ratio", type=int, default=1)
-    parser.add_argument("--duration", default="100us")
-    parser.add_argument("--memory-size", default="128MiB")
-    parser.add_argument("--block-size", type=int)
-    parser.add_argument("--read-buffer-size", type=int)
-    parser.add_argument("--write-buffer-size", type=int)
+    parser.add_argument("--channels", type=int, required=True)
     parser.add_argument(
         "--traffic",
         nargs="+",
-        choices=sorted(TRAFFIC_ALIASES),
+        choices=("stream", "random"),
         default=["stream", "random"],
     )
     parser.add_argument(
-        "--read-ratios",
-        type=int,
-        nargs="+",
-        default=DEFAULT_READ_RATIOS,
+        "--read-ratios", type=int, nargs="+", default=DEFAULT_READ_RATIOS
     )
     parser.add_argument(
-        "--intensities",
-        type=float,
-        nargs="+",
-        default=DEFAULT_INTENSITIES,
+        "--intensities", type=float, nargs="+", default=DEFAULT_INTENSITIES
     )
+    gem5_config.add_shared_args(parser)
     parser.add_argument(
         "--gem5-bin",
         default=os.environ.get("GEM5_BIN", "build/X86/gem5.opt"),
         help="gem5 binary path. Defaults to GEM5_BIN or build/X86/gem5.opt.",
-    )
-    parser.add_argument(
-        "--ramulator2-home",
-        type=Path,
-        default=REPO_ROOT,
-        help="Ramulator2 repo/library root.",
     )
     parser.add_argument(
         "--out-dir",
@@ -223,42 +90,8 @@ def parse_args():
     )
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--force", action="store_true")
-    return parser.parse_args()
 
-
-def resolve_profile_spec(profile):
-    std_cls = DRAMStandard._registry[profile["dram_class"]]
-    dram_cls = getattr(ramulator.dram, profile["dram_class"])
-    dram = dram_cls(
-        org_preset=profile["org_preset"],
-        timing_preset=profile["timing_preset"],
-    )
-    org, timing = dram.resolve()
-    channel_width = org["channel_width"]
-    bytes_per_req = (
-        std_cls.data_payload_bytes
-        or channel_width * std_cls.internal_prefetch_size // 8
-    )
-
-    tck_ns = timing["tCK_ps"] / 1000.0
-    burst_gap = timing.get("nBL_min", timing.get("nBL"))
-    if std_cls.data_payload_bytes is not None and burst_gap is not None:
-        peak_gbps = bytes_per_req / (burst_gap * tck_ns)
-    else:
-        peak_gbps = channel_width * timing["rate"] / 8 / 1000
-
-    if "PseudoChannel" in std_cls.levels:
-        peak_gbps *= org.get("pseudochannel", 2)
-
-    return ProfileSpec(
-        bytes_per_req=bytes_per_req,
-        peak_gbps_per_channel=peak_gbps,
-    )
-
-
-def normalize_args(args):
-    args.addr_mapper = ADDR_MAPPER_ALIASES[args.addr_mapper]
-    args.ramulator2_home = args.ramulator2_home.resolve()
+    args = parser.parse_args()
     args.gem5_bin = Path(args.gem5_bin).resolve()
     if args.out_dir is None:
         args.out_dir = Path("/tmp/gem5-pytrafficgen") / (
@@ -269,112 +102,61 @@ def normalize_args(args):
     return args
 
 
-def validate_args(args):
-    if args.channels <= 0:
-        raise ValueError("--channels must be positive")
-    if args.channels > 1 and (args.channels & (args.channels - 1)) != 0:
-        raise ValueError("--channels must be a power of two")
-    if args.clock_ratio <= 0:
-        raise ValueError("--clock-ratio must be positive")
-    if args.timeout <= 0:
-        raise ValueError("--timeout must be positive")
-    if args.block_size is not None and args.block_size <= 0:
-        raise ValueError("--block-size must be positive")
-    if args.read_buffer_size is not None and args.read_buffer_size <= 0:
-        raise ValueError("--read-buffer-size must be positive")
-    if args.write_buffer_size is not None and args.write_buffer_size <= 0:
-        raise ValueError("--write-buffer-size must be positive")
-    for read_ratio in args.read_ratios:
-        if read_ratio < 0 or read_ratio > 100:
-            raise ValueError("--read-ratios values must be between 0 and 100")
-    for intensity in args.intensities:
-        if intensity <= 0:
-            raise ValueError("--intensities values must be positive")
-    if not args.gem5_bin.exists():
-        raise FileNotFoundError(f"gem5 binary not found: {args.gem5_bin}")
-    if not CONFIG_PATH.exists():
-        raise FileNotFoundError(f"gem5 config not found: {CONFIG_PATH}")
-    if not args.ramulator2_home.exists():
-        raise FileNotFoundError(f"Ramulator2 home not found: {args.ramulator2_home}")
-    if args.out_dir.exists() and any(args.out_dir.iterdir()):
-        if not args.force:
-            raise FileExistsError(
-                f"output directory is not empty: {args.out_dir}; use --force"
-            )
-        shutil.rmtree(args.out_dir)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-
-
-def prepend_env_path(env, key, values):
-    existing = env.get(key)
-    prefix = os.pathsep.join(str(v) for v in values)
-    env[key] = prefix if not existing else prefix + os.pathsep + existing
-
-
-def gem5_env(args):
+def gem5_env():
     env = os.environ.copy()
-    prepend_env_path(
-        env,
-        "PYTHONPATH",
-        [args.ramulator2_home / "python", args.ramulator2_home],
-    )
-    prepend_env_path(env, "LD_LIBRARY_PATH", [args.ramulator2_home])
+    for key, prefix in (
+        ("PYTHONPATH", f"{REPO_ROOT}/python{os.pathsep}{REPO_ROOT}"),
+        ("LD_LIBRARY_PATH", str(REPO_ROOT)),
+    ):
+        env[key] = prefix + (os.pathsep + env[key] if key in env else "")
     return env
 
 
-def format_intensity(value):
-    return f"{value:g}".replace(".", "p")
+def generator_stats(stats, suffix):
+    matches = [
+        value
+        for name, value in stats.items()
+        if name.endswith(f".generator.{suffix}")
+    ]
+    if not matches:
+        raise KeyError(f"missing gem5 generator stat {suffix}")
+    return matches
 
 
-def parse_float(value):
-    if value.lower() == "nan":
-        return math.nan
-    return float(value)
+def weighted_latency(stats, latency_suffix, count_suffix):
+    latencies = generator_stats(stats, latency_suffix)
+    counts = generator_stats(stats, count_suffix)
 
-
-def parse_stats(stats_path):
-    stats = {}
-    for line in stats_path.read_text().splitlines():
-        match = STAT_FLOAT_RE.match(line.strip())
-        if match:
-            stats[match.group(1)] = parse_float(match.group(2))
-    return stats
-
-
-def require_stat(stats, name):
-    if name not in stats:
-        raise KeyError(f"missing gem5 stat {name}")
-    return stats[name]
-
-
-def parse_ramulator_yaml(path):
-    if not path.exists() or path.stat().st_size == 0:
-        raise FileNotFoundError(f"missing or empty Ramulator stats: {path}")
-    with path.open() as fh:
-        data = yaml.safe_load(fh)
-    if not data:
-        raise ValueError(f"empty Ramulator stats YAML: {path}")
-    return data
+    weighted_sum = 0.0
+    total_count = 0.0
+    for latency, count in zip(latencies, counts, strict=True):
+        if math.isnan(latency) or count == 0:
+            continue
+        weighted_sum += latency * count
+        total_count += count
+    return math.nan if total_count == 0 else weighted_sum / total_count
 
 
 def parse_run_outputs(run_dir):
-    stats_path = run_dir / "stats.txt"
-    if not stats_path.exists() or stats_path.stat().st_size == 0:
-        raise FileNotFoundError(f"missing or empty gem5 stats: {stats_path}")
-    parse_ramulator_yaml(run_dir / "ramulator_stats.yaml")
+    stats = {}
+    for line in (run_dir / "stats.txt").read_text().splitlines():
+        match = STAT_FLOAT_RE.match(line.strip())
+        if match:
+            stats[match.group(1)] = float(match.group(2))
 
-    stats = parse_stats(stats_path)
-    sim_freq = require_stat(stats, "simFreq")
-    read_bw = require_stat(stats, "board.processor.cores.generator.readBW")
-    write_bw = require_stat(stats, "board.processor.cores.generator.writeBW")
-    avg_read_latency_ticks = require_stat(
-        stats, "board.processor.cores.generator.avgReadLatency"
+    if "simFreq" not in stats:
+        raise KeyError("missing gem5 stat simFreq")
+    sim_freq = stats["simFreq"]
+    read_bw = sum(generator_stats(stats, "readBW"))
+    write_bw = sum(generator_stats(stats, "writeBW"))
+    avg_read_latency_ticks = weighted_latency(
+        stats, "avgReadLatency", "totalReads"
     )
-    avg_write_latency_ticks = require_stat(
-        stats, "board.processor.cores.generator.avgWriteLatency"
+    avg_write_latency_ticks = weighted_latency(
+        stats, "avgWriteLatency", "totalWrites"
     )
-    total_reads = require_stat(stats, "board.processor.cores.generator.totalReads")
-    total_writes = require_stat(stats, "board.processor.cores.generator.totalWrites")
+    total_reads = sum(generator_stats(stats, "totalReads"))
+    total_writes = sum(generator_stats(stats, "totalWrites"))
     return {
         "read_bw_Bps": read_bw,
         "write_bw_Bps": write_bw,
@@ -386,81 +168,57 @@ def parse_run_outputs(run_dir):
     }
 
 
-def base_row(args, profile, spec):
-    block_size = args.block_size if args.block_size is not None else spec.bytes_per_req
+def base_row(args, profile, block_size, peak_gbps):
     return {
         "dram": args.dram,
-        "dram_class": profile["dram_class"],
-        "org_preset": profile["org_preset"],
-        "timing_preset": profile["timing_preset"],
-        "controller_class": profile["controller_class"],
-        "scheduler_class": profile["scheduler_class"],
-        "row_policy": profile["row_policy"],
+        **profile,
         "channels": args.channels,
+        "peak_gbps": peak_gbps,
+        "block_size": block_size,
         "duration": args.duration,
-        "memory_size": args.memory_size,
+        "memory_per_channel": args.memory_per_channel,
         "addr_mapper": args.addr_mapper,
         "refresh_manager": args.refresh_manager,
-        "channel_mapper": args.channel_mapper,
-        "clock_ratio": args.clock_ratio,
-        "block_size": block_size,
         "read_buffer_size": args.read_buffer_size,
         "write_buffer_size": args.write_buffer_size,
     }
 
 
-def make_command(args, row, traffic):
+def make_command(args, row):
     cmd = [
         str(args.gem5_bin),
         "-d",
         row["run_dir"],
         str(CONFIG_PATH),
-        "--dram-class",
-        row["dram_class"],
-        "--org-preset",
-        row["org_preset"],
-        "--timing-preset",
-        row["timing_preset"],
-        "--controller-class",
-        row["controller_class"],
-        "--scheduler-class",
-        row["scheduler_class"],
-        "--row-policy",
-        row["row_policy"],
+        "--dram",
+        args.dram,
         "--channels",
-        str(row["channels"]),
-        "--rate-bps",
-        str(row["rate_bps"]),
-        "--block-size",
-        str(row["block_size"]),
-        "--duration",
-        row["duration"],
-        "--memory-size",
-        row["memory_size"],
+        str(args.channels),
+        "--intensity",
+        str(row["intensity"]),
         "--read-ratio",
         str(row["read_ratio"]),
         "--traffic",
-        TRAFFIC_ALIASES[traffic],
+        row["traffic"],
+        "--duration",
+        args.duration,
+        "--memory-per-channel",
+        args.memory_per_channel,
         "--addr-mapper",
-        row["addr_mapper"],
+        args.addr_mapper,
         "--refresh-manager",
-        row["refresh_manager"],
-        "--channel-mapper",
-        row["channel_mapper"],
-        "--clock-ratio",
-        str(row["clock_ratio"]),
+        args.refresh_manager,
     ]
-    if row["read_buffer_size"] is not None:
-        cmd.extend(["--read-buffer-size", str(row["read_buffer_size"])])
-    if row["write_buffer_size"] is not None:
-        cmd.extend(["--write-buffer-size", str(row["write_buffer_size"])])
+    for key in ("read_buffer_size", "write_buffer_size"):
+        if getattr(args, key) is not None:
+            cmd.extend([f"--{key.replace('_', '-')}", str(getattr(args, key))])
     return cmd
 
 
-def run_gem5_point(args, row, traffic):
+def run_gem5_point(args, row):
     run_dir = Path(row["run_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
-    cmd = make_command(args, row, traffic)
+    cmd = make_command(args, row)
     (run_dir / "command.json").write_text(json.dumps(cmd, indent=2) + "\n")
     (run_dir / "resolved_config.json").write_text(
         json.dumps(row, indent=2, sort_keys=True) + "\n"
@@ -474,8 +232,8 @@ def run_gem5_point(args, row, traffic):
     try:
         completed = subprocess.run(
             cmd,
-            cwd=args.ramulator2_home,
-            env=gem5_env(args),
+            cwd=REPO_ROOT,
+            env=gem5_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -483,10 +241,7 @@ def run_gem5_point(args, row, traffic):
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        output = exc.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode(errors="replace")
-        (run_dir / "gem5.log").write_text(output)
+        (run_dir / "gem5.log").write_text(exc.stdout or "")
         raise TimeoutError(f"gem5 timed out after {args.timeout}s: {run_dir}") from exc
 
     (run_dir / "gem5.log").write_text(completed.stdout)
@@ -498,33 +253,28 @@ def run_gem5_point(args, row, traffic):
     return parse_run_outputs(run_dir)
 
 
-def rows_for_sweep(args, profile, spec):
+def rows_for_sweep(args, profile, block_size, peak_gbps):
     rows = []
-    common = base_row(args, profile, spec)
-    peak_gbps = spec.peak_gbps_per_channel * args.channels
+    common = base_row(args, profile, block_size, peak_gbps)
     total = len(args.traffic) * len(args.read_ratios) * len(args.intensities)
     index = 0
     for traffic in args.traffic:
         for read_ratio in args.read_ratios:
             for intensity in args.intensities:
                 index += 1
-                rate_bps = int(peak_gbps * 1e9 * intensity)
-                if rate_bps <= 0:
-                    raise ValueError("computed rate_bps must be positive")
                 run_dir = (
                     args.out_dir
                     / "runs"
                     / traffic
                     / f"rr{read_ratio}"
-                    / f"i{format_intensity(intensity)}"
+                    / f"i{intensity:g}".replace(".", "p")
                 )
                 row = {
                     **common,
                     "traffic": traffic,
                     "read_ratio": read_ratio,
                     "intensity": intensity,
-                    "rate_bps": rate_bps,
-                    "peak_gbps": peak_gbps,
+                    "rate_bps": int(peak_gbps * 1e9 * intensity),
                     "run_dir": str(run_dir),
                 }
                 print(
@@ -532,60 +282,46 @@ def rows_for_sweep(args, profile, spec):
                     f"{traffic} ch={args.channels} rr={read_ratio} "
                     f"intensity={intensity:g}"
                 )
-                parsed = run_gem5_point(args, row, traffic)
-                rows.append({**row, **parsed})
+                rows.append({**row, **run_gem5_point(args, row)})
     return rows
 
 
-def write_csv(path, rows):
-    with path.open("w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
+def main():
+    args = parse_args()
+    if args.out_dir.exists() and any(args.out_dir.iterdir()):
+        if not args.force:
+            raise FileExistsError(
+                f"output directory is not empty: {args.out_dir}; use --force"
+            )
+        shutil.rmtree(args.out_dir)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    profile = gem5_config.DRAM_PROFILES[args.dram]
+    block_size, peak_per_channel = gem5_config.resolve_profile_spec(profile)
+    peak_gbps = peak_per_channel * args.channels
 
-def print_global_config(args, profile, spec):
-    block_size = args.block_size if args.block_size is not None else spec.bytes_per_req
-    config = {
-        "dram": args.dram,
-        **profile,
-        "channels": args.channels,
+    sweep_config = {
+        **base_row(args, profile, block_size, peak_gbps),
         "traffic": args.traffic,
         "read_ratios": args.read_ratios,
         "intensities": args.intensities,
-        "duration": args.duration,
-        "memory_size": args.memory_size,
-        "block_size": block_size,
-        "addr_mapper": args.addr_mapper,
-        "refresh_manager": args.refresh_manager,
-        "channel_mapper": args.channel_mapper,
-        "clock_ratio": args.clock_ratio,
-        "read_buffer_size": args.read_buffer_size,
-        "write_buffer_size": args.write_buffer_size,
-        "peak_gbps": spec.peak_gbps_per_channel * args.channels,
-        "peak_gbps_per_channel": spec.peak_gbps_per_channel,
+        "peak_gbps_per_channel": peak_per_channel,
         "gem5_bin": str(args.gem5_bin),
-        "ramulator2_home": str(args.ramulator2_home),
         "out_dir": str(args.out_dir),
     }
+    print(f"Output directory: {args.out_dir}")
     print("Resolved sweep config:")
-    print(json.dumps(config, indent=2, sort_keys=True))
+    print(json.dumps(sweep_config, indent=2, sort_keys=True))
     (args.out_dir / "resolved_sweep_config.json").write_text(
-        json.dumps(config, indent=2, sort_keys=True) + "\n"
+        json.dumps(sweep_config, indent=2, sort_keys=True) + "\n"
     )
 
-
-def main():
-    args = normalize_args(parse_args())
-    validate_args(args)
-    profile = DRAM_PROFILES[args.dram]
-    spec = resolve_profile_spec(profile)
-
-    print(f"Output directory: {args.out_dir}")
-    print_global_config(args, profile, spec)
-    rows = rows_for_sweep(args, profile, spec)
+    rows = rows_for_sweep(args, profile, block_size, peak_gbps)
     results_csv = args.out_dir / "results.csv"
-    write_csv(results_csv, rows)
+    with results_csv.open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
     print(f"Wrote CSV: {results_csv}")
 
 

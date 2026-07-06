@@ -21,8 +21,9 @@ struct Request {
     enum : int { Read = 0, Write = 1 };
   };
 
-  int type_id = -1;    // Request type. -1 is the convention for internal maintenance/direct-command requests.
-  int source_id = -1;  // Source identifier (e.g., which core)
+  int type_id = -1;        // Request type. -1 is the convention for internal maintenance/direct-command requests.
+  int source_id = -1;      // Source identifier (e.g., which core)
+  int ingress_id = -1;     // External ingress identifier (e.g., gem5 memory port)
 
   int size_bytes = -1;     // Request size in bytes. Must be set explicitly by the frontend.
 
