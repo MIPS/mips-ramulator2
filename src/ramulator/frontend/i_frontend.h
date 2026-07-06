@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ramulator/base/base.h"
@@ -74,6 +75,14 @@ class IFrontEnd : public TopLevel<IFrontEnd> {
    *
    */
   virtual bool receive_external_requests(int req_type_id, Addr_t addr, int source_id,
+                                         std::function<void(Request&)> callback,
+                                         int size_bytes) {
+    return receive_external_requests(req_type_id, addr, source_id, -1,
+                                     std::move(callback), size_bytes);
+  }
+
+  virtual bool receive_external_requests(int req_type_id, Addr_t addr, int source_id,
+                                         int ingress_id,
                                          std::function<void(Request&)> callback,
                                          int size_bytes) {
     return false;

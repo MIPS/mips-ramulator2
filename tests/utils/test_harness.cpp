@@ -9,12 +9,14 @@
 #include <string>
 
 #include "ramulator/base/factory.h"
+#include "ramulator/base/request.h"
 #include "ramulator/controller/controller_base.h"
 #include "ramulator/controller/i_controller.h"
 #include "ramulator/controller/plugin/controller_validation_hook.h"
 #include "ramulator/dram/device.h"
 #include "ramulator/dram/dram_spec.h"
 #include "ramulator/frontend/i_frontend.h"
+#include "ramulator/memory_system/channel_mapper/i_channel_mapper.h"
 #include "ramulator/memory_system/i_memory_system.h"
 #include "ramulator/python/binding_utils.h"
 
@@ -191,6 +193,45 @@ class HarnessMemorySystem final : public IMemorySystem, public Implementation {
   IController* m_controller = nullptr;
 };
 
+// ---- ChannelMapperUnderTest harness ----
+
+class ChannelMapperUnderTestCpp {
+ public:
+  ChannelMapperUnderTestCpp(nb::dict mapper_config, int num_channels, int tx_offset) {
+    ConfigNode cfg = py_to_confignode(mapper_config);
+    ConfigNode wrapped = wrap_interface_config(IChannelMapper::get_name(), std::move(cfg));
+    Implementation* mapper_impl =
+        Factory::create_implementation(IChannelMapper::get_name(), wrapped, nullptr);
+    m_impl.reset(mapper_impl);
+
+    m_mapper = dynamic_cast<IChannelMapper*>(mapper_impl);
+    if (!m_mapper) {
+      throw std::runtime_error("ChannelMapperUnderTest failed to create a channel mapper");
+    }
+
+    m_mapper->setup(num_channels, tx_offset);
+  }
+
+  nb::dict apply(Addr_t addr, int ingress_id, int source_id) const {
+    Request req(addr, Request::Type::Read);
+    req.source_id = source_id;
+    req.ingress_id = ingress_id;
+
+    m_mapper->apply(req);
+
+    nb::dict out;
+    out["addr"] = req.addr;
+    out["intra_channel_addr"] = req.intra_channel_addr;
+    out["addr_vec"] = req.addr_vec;
+    out["channel"] = req.addr_vec.empty() ? -1 : req.addr_vec[0];
+    return out;
+  }
+
+ private:
+  std::unique_ptr<Implementation> m_impl;
+  IChannelMapper* m_mapper = nullptr;
+};
+
 class ControllerUnderTestCpp {
  public:
   inline static constexpr int kHarnessInternalSourceId = -2;
@@ -357,6 +398,17 @@ NB_MODULE(_ramulator_test, m) {
       .def("timing", &DeviceUnderTestCpp::timing, nb::arg("name"))
       .def("probe", &DeviceUnderTestCpp::probe, nb::arg("command"), nb::arg("addr_vec"), nb::arg("clk"))
       .def("issue", &DeviceUnderTestCpp::issue, nb::arg("command"), nb::arg("addr_vec"), nb::arg("clk"));
+
+  nb::class_<ChannelMapperUnderTestCpp>(m, "_ChannelMapperUnderTest")
+      .def(nb::init<nb::dict, int, int>(),
+           nb::arg("mapper_config"),
+           nb::arg("num_channels"),
+           nb::arg("tx_offset"))
+      .def("apply",
+           &ChannelMapperUnderTestCpp::apply,
+           nb::arg("addr"),
+           nb::arg("ingress_id") = -1,
+           nb::arg("source_id") = 0);
 
   nb::class_<ControllerUnderTestCpp>(m, "_ControllerUnderTest")
       .def(nb::init<nb::dict, int>(), nb::arg("controller_config"), nb::arg("num_cores") = 1)

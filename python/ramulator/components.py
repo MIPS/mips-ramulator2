@@ -58,13 +58,13 @@ class Component:
 
         descriptors = _get_descriptors(type(self))
         for name, desc in descriptors.items():
-            if isinstance(desc, Param) and hasattr(self, name):
+            if isinstance(desc, Param) and name in self.__dict__:
                 val = getattr(self, name)
                 # Recursively serialize Component values (e.g., org/timing objects)
                 if isinstance(val, Component):
                     val = val.to_config()
                 result[name] = val
-            elif isinstance(desc, Child) and hasattr(self, name):
+            elif isinstance(desc, Child) and name in self.__dict__:
                 child = getattr(self, name)
                 if isinstance(child, Component):
                     result[desc.config_key] = child.to_config()

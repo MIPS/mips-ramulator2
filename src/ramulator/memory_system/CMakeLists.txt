@@ -6,6 +6,7 @@ target_sources(
 
   channel_mapper/i_channel_mapper.h
   channel_mapper/impl/cache_line_interleave.cpp
+  channel_mapper/impl/gem5_port_interleave.cpp
   channel_mapper/impl/passthrough_channel_mapper.cpp
 
   impl/generic_dram_system.cpp

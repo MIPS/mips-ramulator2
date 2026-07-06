@@ -667,13 +667,16 @@ Copy the wrapper files into your gem5 source tree:
 cp -r resources/gem5_wrappers/ <gem5>/src/mem/ramulator2/
 ```
 
-This creates four files:
+This creates the gem5 SimObject declarations, C++ wrapper sources, and build
+file:
 
 | File | Purpose |
 |------|---------|
-| `Ramulator2.py` | gem5 SimObject declaration |
-| `ramulator2.hh` | C++ header |
-| `ramulator2.cc` | C++ implementation |
+| `Ramulator2.py` | Single-port gem5 SimObject declaration |
+| `Ramulator2VectorPorts.py` | Vector-port gem5 SimObject declaration |
+| `ramulator2_base.hh`, `ramulator2_base.cc` | Shared Ramulator lifecycle, ticking, queueing, and stats implementation |
+| `ramulator2.hh`, `ramulator2.cc` | Single-port wrapper implementation |
+| `ramulator2_vector_ports.hh`, `ramulator2_vector_ports.cc` | Vector-port wrapper implementation |
 | `SConscript` | Build configuration |
 
 Edit `SConscript` and set `RAMULATOR2_HOME` to your ramulator2 directory:
@@ -759,6 +762,39 @@ LD_LIBRARY_PATH=/path/to/ramulator2 build/X86/gem5.opt configs/your_config.py
 For request-level debug tracing, add `--debug-flags=Ramulator2`.
 
 Ramulator's internal stats (row hits, queue lengths, read latency, etc.) are written to `m5out/ramulator_stats.yaml` alongside gem5's own `stats.txt`.
+
+### 6.5 PyTrafficGen Latency-Throughput Tests
+
+`tests/latency_throughput/gem5_pytrafficgen/` measures latency-throughput
+curves for multi-channel Ramulator2 memory systems driven by gem5's
+PyTrafficGen. 
+
+Run a full 16 DDR5 channel latency-throughput sweep:
+
+```bash
+GEM5_BIN=<gem5>/build/X86/gem5.opt \
+python3 tests/latency_throughput/gem5_pytrafficgen/run.py --dram DDR5 --channels 16
+```
+
+Or with specific config points:
+
+```bash
+GEM5_BIN=<gem5>/build/X86/gem5.opt \
+python3 tests/latency_throughput/gem5_pytrafficgen/run.py \
+  --dram DDR5 --channels 16 \
+  --traffic stream --read-ratios 100 --intensities 0.5 0.9 1.0
+```
+
+Results and logs will by default be stored in `/tmp/gem5-pytrafficgen/<DRAM>_<MAPPER>_ch<N>/`
+(overridable with `--out-dir`)
+
+
+Plot the results with, e.g.,:
+
+```bash
+python3 tests/latency_throughput/gem5_pytrafficgen/plot.py \
+  --csv /tmp/gem5-pytrafficgen/DDR5_MOP4CLXOR_ch16/results.csv
+```
 
 
 ## 7. Using Ramulator as a pure C++ Library
