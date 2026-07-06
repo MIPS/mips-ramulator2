@@ -41,7 +41,7 @@ class CountingBloomFilter {
         m_counters(num_counters, 0) {
     this->m_num_counters = num_counters;
     this->m_ctr_thresh = ctr_thresh;
-    this->m_saturate = m_saturate;
+    this->m_saturate = saturate;  // typo?  Shinro complains
   }
 
   void insert(int elem) {
